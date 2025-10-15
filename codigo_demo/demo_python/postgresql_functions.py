@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from nonce_functions import*
 from datetime import datetime
+from decimal import Decimal
 # --- Configuración de conexión ---
 # Usa variables de entorno o pon valores por defecto para desarrollo
 DB_NAME = os.getenv("PGDATABASE", "ssiidb")
@@ -128,49 +129,70 @@ def ejecuta_transaccion(usuario, destinatario_esperado, paquete_transaccion, non
         raise ValueError("No puedes transferirte a ti mismo.")
     if cantidad <= 0:
         raise ValueError("La cantidad debe ser mayor que 0.")
+    
+    # ---------------------------
+    # Funciones de mensajería
+    # ---------------------------
+def init_mensajeria():
+    """Crea la tabla de mensajes si no existe (útil para desarrollo)."""
+    q = """
+    CREATE TABLE IF NOT EXISTS mensajes (
+        id SERIAL PRIMARY KEY,
+        emisor TEXT NOT NULL,
+        destinatario TEXT NOT NULL,
+        contenido TEXT NOT NULL,
+        fecha TIMESTAMP NOT NULL,
+        leido BOOLEAN DEFAULT FALSE
+    )
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(q)
 
-    # Operación atómica igual que en la opción A
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT username, cuenta FROM usuarios
-                WHERE username IN (%s, %s)
-                FOR UPDATE
-                """,
-                (usuario, destinatario_firmado)
-            )
-            filas = cur.fetchall()
-            if len(filas) < 2:
-                raise ValueError("Usuario origen o destinatario no existe.")
 
-            saldos = {row[0]: int(row[1]) for row in filas}
-            saldo_usuario = saldos.get(usuario, 0)
-            saldo_destinatario = saldos.get(destinatario_firmado, 0)
+def enviar_mensaje(emisor: str, destinatario: str, contenido: str) -> bool:
+    """Inserta un mensaje en la tabla `mensajes`. Devuelve True si tuvo éxito."""
+    q = """
+    INSERT INTO mensajes (emisor, destinatario, contenido, fecha, leido)
+    VALUES (%s, %s, %s, %s, false)
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(q, (emisor, destinatario, contenido, datetime.now()))
+        return cur.rowcount == 1
 
-            if saldo_usuario < cantidad:
-                raise ValueError("Saldo insuficiente en la cuenta de origen.")
 
-            nuevo_saldo_usuario = saldo_usuario - cantidad
-            nuevo_saldo_destinatario = saldo_destinatario + cantidad
 
-            cur.execute(
-                "UPDATE usuarios SET cuenta = %s WHERE username = %s",
-                (nuevo_saldo_usuario, usuario)
-            )
-            if cur.rowcount != 1:
-                raise RuntimeError("No se pudo actualizar el saldo del usuario origen.")
+def leer_mensajes(usuario: str) -> list:
+    """Devuelve una lista de mensajes dirigidos a `usuario`.
+    Cada mensaje es un dict: {emisor, contenido, fecha} con fecha formateada.
+    Marca los mensajes como leídos.
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, emisor, contenido, fecha, leido FROM mensajes WHERE destinatario = %s ORDER BY fecha ASC",
+            (usuario,),
+        )
+        rows = cur.fetchall()
+        msgs = []
+        ids = []
+        for r in rows:
+            ids.append(r[0])
+            fecha = r[3]
+            # Formato más agradable: DD/MM/YYYY HH:MM
+            fecha_str = fecha.strftime("%d/%m/%Y %H:%M") if hasattr(fecha, "strftime") else str(fecha)
+            msgs.append({
+                'emisor': r[1],
+                'contenido': r[2],
+                'fecha': fecha_str,
+            })
 
-            cur.execute(
-                "UPDATE usuarios SET cuenta = %s WHERE username = %s",
-                (nuevo_saldo_destinatario, destinatario_firmado)
-            )
-            if cur.rowcount != 1:
-                raise RuntimeError("No se pudo actualizar el saldo del destinatario.")
+        if ids:
+            # Marcar como leidos — usar ANY para pasar la lista correctamente a PostgreSQL
+            cur.execute("UPDATE mensajes SET leido = TRUE WHERE id = ANY(%s)", (ids,))
 
-            registrar_transaccion(usuario, destinatario_firmado, cantidad)
-            
-    return True
+        return msgs
+
+
+
 
                     
 def registrar_transaccion(usuario, destinatario, valor):

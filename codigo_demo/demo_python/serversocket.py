@@ -26,6 +26,9 @@ ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 # Cargar el certificado y la clave del servidor (firmados por la CA local)
 ssl_context.load_cert_chain(certfile=certfile, keyfile=keyfile)
 
+# Asegurar que la tabla de mensajes exista
+init_mensajeria()
+
 
 def is_strong_password(password):
     if len(password) < 8:
@@ -108,75 +111,90 @@ with ssl_context.wrap_socket(server_socket, server_side=True) as ssl_socket:
                             conn.sendall(b"Login exitoso.\n")
                             nonce_server = secrets.token_hex(16)
                             conn.sendall(nonce_server.encode())
-
-                            ACK = conn.recv(1024)
-
+                            ack = conn.recv(1024)  # Esperar ACK del cliente
+                            print(f"ACK del cliente recibido: {ack.decode().strip()}")
+                            # Iniciar bucle persistente de sesión: repetir menú hasta cerrar sesión
                             menu = (
-                            b"\nQue deseas hacer?\n"
-                            b"1. Transaccion\n"
-                            b"2. Cerrar sesion\n"
+                                b"\nQue deseas hacer?\n"
+                                b"1. Enviar mensaje\n"
+                                b"2. Leer mensajes\n"
+                                b"3. Cerrar sesion\n"
+                                b">\n"
                             )
-                            conn.sendall(menu)
-                            print("Menu enviado, esperando ACK...")
-                            ACK = conn.recv(1024)
-                            print(ACK)
-                            if not ACK:
-                                break
+                            print(f"Iniciando bucle de sesión para usuario: {username}")
+                            while True:
+                                # Enviar el menú
+                                try:
+                                    conn.sendall(menu)
+                                except Exception:
+                                    break
+                                # Leer la opción del cliente
+                                ACK_menu = conn.recv(1024)  # Esperar ACK del cliente
+                                print(f"ACK del cliente recibido: {ACK_menu.decode().strip()}")
+                                # Esperar la opción del usuario
+                                opcion_sesion_data = conn.recv(1024)
+                                if not opcion_sesion_data:
+                                    break
+                                opcion_sesion = opcion_sesion_data.decode().strip()
+                                print(f"Opcion de sesion recibida: {opcion_sesion}")
+                                payload_json = None
 
-                            opcion_sesion_data = conn.recv(1024)
-                            print(opcion_sesion_data)
-                            if not opcion_sesion_data:
-                                break
+                                if opcion_sesion == "1":
+                                    # Enviar mensaje a otro usuario
+                                    conn.sendall(b"Introduce el nombre del destinatario:\n")
+                                    destinatario = conn.recv(1024).strip().decode('utf-8')
+                                    if not usuario_existe(destinatario):
+                                        mensaje_a_enviar = "\n Error: El destinatario no existe. Operacion cancelada.\n"
+                                    else:
+                                        conn.sendall(b"Introduce el mensaje:\n")
+                                        contenido = conn.recv(4096).strip().decode('utf-8')
+                                        ok = enviar_mensaje(username, destinatario, contenido)
+                                        if ok:
+                                            mensaje_a_enviar = "Mensaje enviado correctamente.\n"
+                                        else:
+                                            mensaje_a_enviar = "Error al enviar el mensaje.\n"
 
-                            opcion_sesion = opcion_sesion_data.decode().strip()
+                                elif opcion_sesion == "2":
+                                    print(f"El usuario {username} ha solicitado leer mensajes.")
+                                    # Leer mensajes dirigidos al usuario
+                                    msgs = leer_mensajes(username)
+                                    obtenidos = len(msgs)
+                                    print(f"Mensajes obtenidos: {obtenidos}")
 
-                            if opcion_sesion == "1":
-                                conn.sendall(b"Iniciando transaccion.\n")
+                                    if len(msgs) == 0:
+                                        mensaje_a_enviar = "No hay mensajes nuevos.\n"
+                                    else:
+                                        payload_json = json.dumps(msgs)
+                                elif opcion_sesion == "3":
+                                    try:
+                                        conn.sendall(b"Cerrando sesion. Adios.\n")
+                                    except Exception:
+                                        pass
+                                    print(f"Cerrando conexión con {addr}")
+                                    try:
+                                        conn.shutdown(socket.SHUT_RDWR)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        conn.close()
+                                    except Exception:
+                                        pass
+                                    break
 
-                                conn.sendall(b"Introduce el nombre del destinatario:\n")
-
-                                destinatario = conn.recv(1024).strip()
-                                destinatario = destinatario.decode("utf-8")
-
-                                if not usuario_existe(destinatario):
-                                    conn.sendall(b"\n Error: El destinatario no existe. Transaccion cancelada.\n")
-                                    continue
                                 else:
-                                    print("usuario verificado")
-                                    saldo = leer_saldo_int(username)
-                                    mensaje = f"{saldo} \n"
-                                    conn.sendall(f"Su saldo en cuenta es:\n{mensaje}\nIntroduce la cantidad a transferir:\n".encode())
+                                    mensaje_a_enviar = "Opcion no valida.\n"
 
-                                    cantidad = conn.recv(1024).strip()
-                                    cantidad = cantidad.decode("utf-8")
-                                    print("cantidad recibida: " + cantidad)
-                                    conn.sendall(b"ack de la cantidad")
-
-                                raw_datos = conn.recv(4096).strip()
-                                datos_trans = json.loads(raw_datos.decode())
-                                conn.sendall(b"ack de los datos")
-                                if verificar_usuario(username, password_txt):
-                                    ejecuta_transaccion(username, destinatario, datos_trans, nonce_server)
-                                    nonce_cliente = conn.recv(1024).strip()
-                                    conn.sendall(b"ack del nonce del cliente")
-                                    mensaje = (
-                                        f"\n✅ Transaccion exitosa:\n"
-                                        f"   Destinatario: {destinatario}\n"
-                                        f"   Cantidas: {cantidad}\n"
-                                        f"   (Confirmado con contrasena).\n"
-                                    )
-                                    conn.sendall(mensaje.encode())
-                                else:
-                                    conn.sendall(b"\n Contrasena de confirmacion incorrecta. Transaccion cancelada.\n")
-
-                            elif opcion_sesion == "2":
-                                conn.sendall(b"Cerrando sesion. Adios.\n")
-                                break
-
-                            else:
-                                conn.sendall(b"Opcion no valida.\n")
-
-                            break
+                                # Enviar mensaje de resultado o payload antes del siguiente menú
+                                if payload_json is not None:
+                                    try:
+                                        conn.sendall(payload_json.encode())
+                                    except Exception:
+                                        break
+                                elif mensaje_a_enviar is not None:
+                                    try:
+                                        conn.sendall(mensaje_a_enviar.encode())
+                                    except Exception:
+                                        break
 
             else:
                 conn.sendall(b"Usuario o contrasena incorrectos (FINAL).\n")
