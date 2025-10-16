@@ -3,7 +3,7 @@ from nonce_functions import *
 import json
 import secrets
 import ssl
-
+from postgresql_functions import usuario_existe
 HOST = "localhost"
 PORT = 3030
 CERT_DIR = "certs"
@@ -109,12 +109,26 @@ with ssl_context.wrap_socket(client_socket, server_hostname=HOST) as s:
                     menu_text = (MENU_MARK + resto).decode(errors="replace").strip()
                     print(menu_text)
 
-                    # ACK del menú (el servidor lo espera)
-                    s.sendall(b"ack del menu")
-
+                    
+                    s.sendall(b"ack")
+                        
                     # Enviar opción
                     opcion_sesion = input().strip()
                     s.sendall(opcion_sesion.encode())
+
+                    if opcion_sesion == "1":
+                        destinatario_prompt = s.recv(1024).decode().strip()
+                        print(destinatario_prompt)
+                        destinatario = input("> ").strip()
+                        s.sendall(destinatario.encode())
+
+                        contenido_prompt = s.recv(1024).decode().strip()
+                        print(contenido_prompt)
+                        contenido = input("> ").strip()
+                        s.sendall(contenido.encode())
+
+                        resultado = s.recv(1024).decode().strip()
+                        print(resultado)
 
             elif "Usuario bloqueado temporalmente" in resp:
                 print(resp)
