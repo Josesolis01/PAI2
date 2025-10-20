@@ -151,7 +151,10 @@ def init_mensajeria():
 
 def enviar_mensaje(emisor: str, destinatario: str, contenido: str) -> bool:
     """Inserta un mensaje en la tabla `mensajes`. Devuelve True si tuvo éxito."""
-    q = """
+    
+    if len(contenido) > 144:
+        raise ValueError("El contenido del mensaje no puede exceder 144 caracteres.")
+    q = """ 
     INSERT INTO mensajes (emisor, destinatario, contenido, fecha, leido)
     VALUES (%s, %s, %s, %s, false)
     """
