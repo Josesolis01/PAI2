@@ -3,6 +3,8 @@ import ssl
 from messaging_service import ensure_tables
 from auth_service import handle_registration, handle_login
 from session_service import handle_session
+from postgresql_functions import create_database_if_not_exists
+
 
 HOST = "127.0.0.1"
 PORT = 3030
@@ -16,6 +18,8 @@ server_socket.listen(5)
 ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 ssl_context.load_cert_chain(certfile=certfile, keyfile=keyfile)
 
+
+create_database_if_not_exists()
 # Asegurar tablas
 ensure_tables()
 

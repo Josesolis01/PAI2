@@ -2,11 +2,13 @@
 import os
 import bcrypt
 import psycopg2
+from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from contextlib import contextmanager
 from decimal import Decimal, InvalidOperation
 from nonce_functions import*
 from datetime import datetime
 from decimal import Decimal
+
 # --- Configuración de conexión ---
 # Usa variables de entorno o pon valores por defecto para desarrollo
 DB_NAME = os.getenv("PGDATABASE", "ssiidb")
@@ -14,6 +16,42 @@ DB_USER = os.getenv("PGUSER", "postgres")
 DB_PASS = os.getenv("PGPASSWORD", "pua12398")
 DB_HOST = os.getenv("PGHOST", "127.0.0.1")
 DB_PORT = os.getenv("PGPORT", "5432")
+
+# --- INICIO DE LA NUEVA FUNCIÓN ---
+def create_database_if_not_exists():
+    """
+    Se conecta al servidor PostgreSQL y crea la base de datos 'ssiidb' si no existe.
+    Esta función debe ser llamada al inicio de la aplicación del servidor.
+    """
+    try:
+        # Conectamos a la DB 'postgres' por defecto para tener permisos de creación
+        conn = psycopg2.connect(
+            dbname='postgres', user=DB_USER, password=DB_PASS, host=DB_HOST, port=DB_PORT
+        )
+        # CREATE DATABASE no puede ejecutarse en una transacción, usamos autocommit
+        conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        cursor = conn.cursor()
+        
+        # Comprobamos si la base de datos ya existe
+        cursor.execute(f"SELECT 1 FROM pg_database WHERE datname = '{DB_NAME}'")
+        exists = cursor.fetchone()
+        
+        if not exists:
+            print(f"La base de datos '{DB_NAME}' no existe. Creándola...")
+            cursor.execute(f"CREATE DATABASE {DB_NAME}")
+            print("Base de datos creada exitosamente.")
+        else:
+            print(f"La base de datos '{DB_NAME}' ya existe. No se requiere ninguna acción.")
+            
+        cursor.close()
+        conn.close()
+        return True, "Inicialización de base de datos correcta."
+    except psycopg2.OperationalError as e:
+        # Este error suele ocurrir si el servicio de PostgreSQL no está corriendo
+        return False, f"Error de conexión a PostgreSQL: {e}"
+    except Exception as e:
+        return False, f"Un error inesperado ocurrió: {e}"
+# --- FIN DE LA NUEVA FUNCIÓN ---
 
 @contextmanager
 def get_conn():
@@ -224,5 +262,3 @@ def registrar_transaccion(usuario, destinatario, valor):
         )
         if cur.rowcount != 1:
             raise RuntimeError("No se pudo registrar la transacción.")
-        
-
