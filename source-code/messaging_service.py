@@ -1,4 +1,4 @@
-from postgresql_functions import init_mensajeria, enviar_mensaje, leer_mensajes
+from postgresql_functions import *
 
 def ensure_tables():
     init_mensajeria()

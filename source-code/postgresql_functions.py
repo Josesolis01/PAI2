@@ -41,6 +41,7 @@ def _get_user_hash(username: str):
 # 1) usuario_existe(usuario) -> bool
 # -----------------------------------------------------------
 def usuario_existe(usuario: str) -> bool:
+    init_usuarios() # Asegura que la tabla exista
     q = "SELECT 1 FROM usuarios WHERE username = %s"
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(q, (usuario,))
@@ -52,6 +53,8 @@ def usuario_existe(usuario: str) -> bool:
 #   - Devuelve True/False y mensaje explicativo
 # -----------------------------------------------------------
 def crear_usuario(usuario: str, password: str):
+    init_usuarios() # Asegura que la tabla exista
+
     if not usuario or not password:
         return False, "Usuario y contraseña son obligatorios."
 
@@ -61,7 +64,7 @@ def crear_usuario(usuario: str, password: str):
 
     if usuario_existe(usuario):
         return False, "El usuario ya existe."
-
+    
     # Generar hash bcrypt (es ASCII, lo guardamos como TEXT)
     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
@@ -76,6 +79,18 @@ def crear_usuario(usuario: str, password: str):
         if getattr(e, "pgcode", None) == "23505":
             return False, "El usuario ya existe."
         return False, f"Error de base de datos: {e.pgerror or str(e)}"
+    
+def init_usuarios():
+    """Crea la tabla de usuarios si no existe (útil para desarrollo)."""
+    q = """
+    CREATE TABLE IF NOT EXISTS usuarios (
+        username TEXT PRIMARY KEY,
+        password TEXT NOT NULL,
+        cuenta NUMERIC DEFAULT 0
+    )
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(q)
 
 # -----------------------------------------------------------
 # 3) verificar_usuario(usuario, password) -> bool
