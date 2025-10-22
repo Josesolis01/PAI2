@@ -14,7 +14,7 @@ keyfile = 'certs/server.key'
 # 2. Creamos una función que contiene TODA la lógica para un solo cliente.
 #    Esto es lo que se ejecutará en cada hilo.
 def handle_client_thread(conn, addr):
-    print(f"✅ Hilo iniciado para atender a {addr}")
+    print(f"Hilo iniciado para atender a {addr}")
     try:
         # El 'with conn:' asegura que la conexión se cierre al final del bloque
         with conn:
@@ -52,11 +52,11 @@ def handle_client_thread(conn, addr):
             else:
                 conn.sendall(b"OPCION NO VALIDA, CERRANDO CONEXION\n")
     except (ConnectionResetError, BrokenPipeError):
-        print(f"⚠️  El cliente {addr} se desconectó abruptamente.")
+        print(f"El cliente {addr} se desconectó abruptamente.")
     except Exception as e:
-        print(f"❌ Error en el hilo para {addr}: {e}")
+        print(f"Error en el hilo para {addr}: {e}")
     finally:
-        print(f"🛑 Hilo para {addr} terminado.")
+        print(f"Hilo para {addr} terminado.")
 
 # --- Punto de entrada del Servidor ---
 if __name__ == "__main__":
@@ -72,7 +72,7 @@ if __name__ == "__main__":
     ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ssl_context.load_cert_chain(certfile=certfile, keyfile=keyfile)
 
-    print(f"🚀 Servidor SSL Concurrente escuchando en {HOST}:{PORT}...")
+    print(f"Servidor SSL Concurrente escuchando en {HOST}:{PORT}...")
 
     with ssl_context.wrap_socket(server_socket, server_side=True) as ssl_socket:
         while True:

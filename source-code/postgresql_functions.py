@@ -12,8 +12,8 @@ from decimal import Decimal
 # --- Configuración de conexión ---
 # Usa variables de entorno o pon valores por defecto para desarrollo
 DB_NAME = os.getenv("PGDATABASE", "ssiidb")
-DB_USER = os.getenv("PGUSER", "postgres")
-DB_PASS = os.getenv("PGPASSWORD", "pua12398")
+DB_USER = os.getenv("PGUSER", "postgres") # CAMBIAR POR USUARIO ADECUADO
+DB_PASS = os.getenv("PGPASSWORD", "pua12398") # CAMBIAR POR CONTRASEÑA ADECUADA
 DB_HOST = os.getenv("PGHOST", "127.0.0.1")
 DB_PORT = os.getenv("PGPORT", "5432")
 
