@@ -31,7 +31,7 @@ def create_database_if_not_exists():
         # CREATE DATABASE no puede ejecutarse en una transacción, usamos autocommit
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         cursor = conn.cursor()
-        
+
         # Comprobamos si la base de datos ya existe
         cursor.execute(f"SELECT 1 FROM pg_database WHERE datname = '{DB_NAME}'")
         exists = cursor.fetchone()
@@ -39,6 +39,9 @@ def create_database_if_not_exists():
         if not exists:
             print(f"La base de datos '{DB_NAME}' no existe. Creándola...")
             cursor.execute(f"CREATE DATABASE {DB_NAME}")
+            # Después de crear la base de datos, podemos inicializar las tablas necesarias
+            crear_usuario("Angel", "Angel123?")
+            crear_usuario("Rafael", "Rafael123?")
             print("Base de datos creada exitosamente.")
         else:
             print(f"La base de datos '{DB_NAME}' ya existe. No se requiere ninguna acción.")
@@ -79,6 +82,7 @@ def _get_user_hash(username: str):
 # 1) usuario_existe(usuario) -> bool
 # -----------------------------------------------------------
 def usuario_existe(usuario: str) -> bool:
+
     init_usuarios() # Asegura que la tabla exista
     q = "SELECT 1 FROM usuarios WHERE username = %s"
     with get_conn() as conn, conn.cursor() as cur:
@@ -187,7 +191,7 @@ def ejecuta_transaccion(usuario, destinatario_esperado, paquete_transaccion, non
     # Funciones de mensajería
     # ---------------------------
 def init_mensajeria():
-    """Crea la tabla de mensajes si no existe (útil para desarrollo)."""
+    """Crea la tabla de mensajes si no existe"""
     q = """
     CREATE TABLE IF NOT EXISTS mensajes (
         id SERIAL PRIMARY KEY,

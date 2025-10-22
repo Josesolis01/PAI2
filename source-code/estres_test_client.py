@@ -2,67 +2,138 @@ import socket
 import ssl
 import threading
 import time
+import sys
+from postgresql_functions import crear_usuario, usuario_existe
 
+# --- Configuración de la Prueba ---
 HOST = "localhost"
 PORT = 3030
 CA_CERT = "certs/ca.crt"
 
-# --- Configuración de la prueba ---
-NUM_CLIENTS = 300  # ¡Prueba con 10, 50, 100 o hasta 300!
-USER_TO_TEST = "marta" # Un usuario que ya debe existir en tu DB
-PASS_TO_TEST = "Marta123?" # La contraseña de ese usuario
+NUM_CLIENTS = 300
+TEST_USER_PREFIX = "testuser"
+TEST_USER_PASS = "password123"
 
-def run_client(client_id):
-    """
-    Esta función simula un único cliente.
-    """
+# --- Variables Globales para seguimiento (Versión Corregida) ---
+active_connections = 0
+connections_lock = threading.Lock() # 1. Usamos un Lock para proteger el contador
+test_failed = threading.Event()
+
+def prepare_test_users():
+    """Registra los usuarios de prueba en la DB si no existen."""
+    print("🔧 Preparando usuarios de prueba...")
+    created_count = 0
+    for i in range(NUM_CLIENTS):
+        username = f"{TEST_USER_PREFIX}{i}"
+        if not usuario_existe(username):
+            ok, msg = crear_usuario(username, TEST_USER_PASS)
+            if ok:
+                created_count += 1
+            else:
+                print(f"Error creando {username}: {msg}")
+                sys.exit(1)
+    if created_count > 0:
+        print(f"✅ {created_count} nuevos usuarios de prueba creados.")
+    else:
+        print("✅ Todos los usuarios de prueba ya existían.")
+
+def client_thread(client_id: int):
+    """Lógica para un solo cliente que se conecta y se mantiene vivo."""
+    global active_connections # Necesario para modificar la variable global
+    username = f"{TEST_USER_PREFIX}{client_id}"
+    
     ssl_context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=CA_CERT)
-    ssl_context.check_hostname = True
-    ssl_context.verify_mode = ssl.CERT_REQUIRED
-
+    
     try:
         with socket.create_connection((HOST, PORT)) as sock:
             with ssl_context.wrap_socket(sock, server_hostname=HOST) as ssock:
-                print(f"[Cliente {client_id}]: Conectado al servidor.")
-                
-                # 1. Esperar el primer prompt
+                # 1. Login automático
                 ssock.recv(1024)
-                
-                # 2. Enviar opción "login"
                 ssock.sendall(b"login")
+                ssock.recv(1024)
+                ssock.sendall(username.encode())
+                ssock.recv(1024)
+                ssock.sendall(TEST_USER_PASS.encode())
                 
-                # 3. Enviar usuario
-                ssock.recv(1024) # Esperar prompt de usuario
-                ssock.sendall(USER_TO_TEST.encode())
-                
-                # 4. Enviar contraseña
-                ssock.recv(1024) # Esperar prompt de contraseña
-                ssock.sendall(PASS_TO_TEST.encode())
-                
-                # 5. Recibir respuesta de login y cerrar
-                response = ssock.recv(1024).decode(errors='ignore')
-                if "Login exitoso" in response:
-                    print(f"[Cliente {client_id}]: Login exitoso. Desconectando.")
-                else:
-                    print(f"[Cliente {client_id}]: Falló el login. Respuesta: {response.strip()}")
+                login_resp = ssock.recv(1024).decode()
+                if "Login exitoso" not in login_resp:
+                    print(f"[Cliente {client_id}] ❌ Login fallido: {login_resp.strip()}")
+                    test_failed.set()
+                    return
 
+                ssock.recv(1024)
+                ssock.sendall(b"ack")
+
+                # 2. Incrementamos el contador de forma segura
+                with connections_lock:
+                    active_connections += 1
+                
+                # 3. Mantener la conexión abierta
+                while not test_failed.is_set():
+                    data = ssock.recv(4096)
+                    if not data:
+                        print(f"[Cliente {client_id}] ❌ Conexión cerrada inesperadamente por el servidor.")
+                        test_failed.set()
+                        break
+                        
     except Exception as e:
-        print(f"[Cliente {client_id}]: Error - {e}")
+        if not test_failed.is_set():
+            print(f"[Cliente {client_id}] ❌ Error: {e}")
+            test_failed.set()
+    finally:
+        # 4. Decrementamos el contador de forma segura
+        with connections_lock:
+            active_connections -= 1
 
-# --- Bucle principal para lanzar los hilos ---
+# --- Punto de entrada de la Prueba ---
 if __name__ == "__main__":
+    prepare_test_users()
+    
+    print(f"\n🚀 Iniciando prueba con {NUM_CLIENTS} conexiones simultáneas...")
+    
     threads = []
-    print(f"Lanzando {NUM_CLIENTS} clientes de prueba...")
-
     for i in range(NUM_CLIENTS):
-        # Creamos un hilo por cada cliente
-        thread = threading.Thread(target=run_client, args=(i,))
+        thread = threading.Thread(target=client_thread, args=(i,))
         threads.append(thread)
         thread.start()
-        time.sleep(0.05) # Pequeña pausa para no sobrecargar la red al instante
+        time.sleep(0.05)
 
-    # Esperamos a que todos los hilos terminen
-    for thread in threads:
-        thread.join()
+    try:
+        start_time = time.time()
+        # Esperar a que todos los clientes se conecten
+        while time.time() - start_time < 60: # Timeout de 60 segundos
+            with connections_lock:
+                current_connections = active_connections
+            
+            print(f"\r🕒 Tiempo: {int(time.time() - start_time)}s | 🟢 Conexiones activas: {current_connections}/{NUM_CLIENTS}", end="")
 
-    print("Prueba de estrés completada.")
+            if current_connections == NUM_CLIENTS:
+                break
+            
+            if test_failed.is_set():
+                break # Salir si se detecta un fallo
+                
+            time.sleep(1)
+
+        print("\n") # Nueva línea después del contador
+
+        if test_failed.is_set():
+            print("--- ❌ PRUEBA FALLIDA: Se detectó un error en una de las conexiones. ---")
+        elif active_connections < NUM_CLIENTS:
+             print(f"--- ❌ PRUEBA FALLIDA: Timeout. Solo se establecieron {active_connections} de {NUM_CLIENTS} conexiones. ---")
+        else:
+            print(f"--- ✅ PRUEBA EXITOSA: Las {NUM_CLIENTS} conexiones están abiertas y persistentes. ---")
+            print("Monitorizando estabilidad... (Detén con Ctrl+C)")
+            while not test_failed.is_set():
+                time.sleep(1)
+            print("\n--- ❌ PRUEBA FALLIDA: Una conexión se cayó después del éxito inicial. ---")
+
+    except KeyboardInterrupt:
+        print("\n\nPrueba detenida por el usuario.")
+        test_failed.set()
+
+    print("Esperando que todos los hilos terminen...")
+    for t in threads:
+        t.join()
+        
+    print("Prueba finalizada.")
